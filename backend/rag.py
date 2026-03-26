@@ -6,15 +6,33 @@ import os
 from urllib import error, request
 
 from dotenv import load_dotenv
-from qdrant_client import QdrantClient
+from langchain_core.documents import Document
+from langchain_core.embeddings import Embeddings
+from langchain_qdrant import QdrantVectorStore
 
 load_dotenv()
 
+_PDF_PREFIX = "__PDF_BASE64__::"
 
-class GeminiEmbedder:
+
+class GeminiEmbedder(Embeddings):
     def __init__(self):
         self.api_key = os.getenv("GEMINI_API_KEY")
         self.model = os.getenv("EMBEDDING_MODEL", "gemini-embedding-2-preview")
+
+    def embed_query(self, text: str) -> list[float]:
+        return self.embed_text(text, task_type="RETRIEVAL_QUERY")
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        vectors: list[list[float]] = []
+        for text in texts:
+            if text.startswith(_PDF_PREFIX):
+                b64_data = text[len(_PDF_PREFIX) :]
+                pdf_bytes = base64.b64decode(b64_data)
+                vectors.append(self.embed_pdf_bytes(pdf_bytes))
+            else:
+                vectors.append(self.embed_text(text, task_type="RETRIEVAL_DOCUMENT"))
+        return vectors
 
     def embed_text(self, text: str, task_type: str = "RETRIEVAL_QUERY") -> list[float]:
         payload = {
@@ -86,24 +104,26 @@ class Retriever:
             return []
 
         try:
-            query_vector = self.embedder.embed_text(query, task_type="RETRIEVAL_QUERY")
-            client = QdrantClient(url=self.url, api_key=self.api_key)
-            response = client.query_points(
+            vector_store = QdrantVectorStore.from_existing_collection(
                 collection_name=self.collection,
-                query=query_vector,
-                limit=limit,
-                with_payload=True,
-                with_vectors=False,
+                embedding=self.embedder,
+                url=self.url,
+                api_key=self.api_key,
             )
-
-            points = _extract_points(response)
+            docs = vector_store.similarity_search(query, k=limit)
 
             results: list[str] = []
-            for point in points:
-                payload = getattr(point, "payload", None) or {}
-                text = payload.get("text") or payload.get("content") or payload.get("chunk")
-                if isinstance(text, str) and text.strip():
-                    results.append(text.strip())
+            for doc in docs:
+                content = doc.page_content if isinstance(doc.page_content, str) else ""
+                metadata = doc.metadata or {}
+
+                if metadata.get("is_native_pdf_embedding"):
+                    source = metadata.get("source", "unknown source")
+                    results.append(f"[Relevant content from PDF: {source}]")
+                    continue
+
+                if content and not content.startswith(_PDF_PREFIX):
+                    results.append(content)
 
             return results
         except Exception:
@@ -128,15 +148,16 @@ class Retriever:
         return [text for _, text in scored[:limit]]
 
 
-def _extract_points(response: object) -> list[object]:
-    points = getattr(response, "points", None)
-    if isinstance(points, list):
-        return points
-
-    if isinstance(response, list):
-        return response
-
-    return []
+def build_pdf_document(pdf_bytes: bytes, source: str) -> Document:
+    encoded = base64.b64encode(pdf_bytes).decode("utf-8")
+    return Document(
+        page_content=f"{_PDF_PREFIX}{encoded}",
+        metadata={
+            "source": source,
+            "type": "pdf",
+            "is_native_pdf_embedding": True,
+        },
+    )
 
 
 def _extract_vector(response_json: dict) -> list[float]:

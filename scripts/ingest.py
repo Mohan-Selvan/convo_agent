@@ -3,17 +3,16 @@ from __future__ import annotations
 import argparse
 import sys
 from pathlib import Path
-from uuid import uuid4
 
 from dotenv import load_dotenv
+from langchain_core.documents import Document
+from langchain_qdrant import QdrantVectorStore
 from pypdf import PdfReader
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
 
 # Make project root importable when running: python scripts/ingest.py ...
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from backend.rag import GeminiEmbedder
+from backend.rag import GeminiEmbedder, build_pdf_document
 
 load_dotenv()
 
@@ -31,12 +30,7 @@ def ingest_directory(
     if not files:
         return 0
 
-    embedder = GeminiEmbedder()
-    qdrant_url = _get_env("QDRANT_URL")
-    qdrant_api_key = _get_optional_env("QDRANT_API_KEY")
-    client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
-
-    points: list[PointStruct] = []
+    documents: list[Document] = []
 
     for file_path in files:
         suffix = file_path.suffix.lower()
@@ -45,78 +39,51 @@ def ingest_directory(
             pdf_chunks = _extract_pdf_chunks(file_path, chunk_size, chunk_overlap)
             if pdf_chunks:
                 for page_no, chunk in pdf_chunks:
-                    vector = embedder.embed_text(chunk, task_type="RETRIEVAL_DOCUMENT")
-                    payload = {
-                        "source": str(file_path),
-                        "type": "pdf",
-                        "page": page_no,
-                        "text": chunk,
-                    }
-                    points.append(
-                        PointStruct(
-                            id=str(uuid4()),
-                            vector=vector,
-                            payload=payload,
+                    documents.append(
+                        Document(
+                            page_content=chunk,
+                            metadata={
+                                "source": str(file_path),
+                                "type": "pdf",
+                                "page": page_no,
+                            },
                         )
                     )
             else:
-                pdf_bytes = file_path.read_bytes()
-                vector = embedder.embed_pdf_bytes(pdf_bytes)
-                payload = {
-                    "source": str(file_path),
-                    "type": "pdf",
-                    "text": f"[PDF indexed natively with {embedder.model}]",
-                }
-                points.append(
-                    PointStruct(
-                        id=str(uuid4()),
-                        vector=vector,
-                        payload=payload,
-                    )
-                )
+                documents.append(build_pdf_document(file_path.read_bytes(), str(file_path)))
             continue
 
         text = file_path.read_text(encoding="utf-8", errors="ignore")
         for chunk in _chunk_text(text, chunk_size, chunk_overlap):
-            vector = embedder.embed_text(chunk, task_type="RETRIEVAL_DOCUMENT")
-            payload = {
-                "source": str(file_path),
-                "type": suffix.lstrip("."),
-                "text": chunk,
-            }
-            points.append(
-                PointStruct(
-                    id=str(uuid4()),
-                    vector=vector,
-                    payload=payload,
+            documents.append(
+                Document(
+                    page_content=chunk,
+                    metadata={
+                        "source": str(file_path),
+                        "type": suffix.lstrip("."),
+                    },
                 )
             )
 
-    if not points:
+    if not documents:
         return 0
 
-    vector_size = len(points[0].vector)
-    _ensure_collection(client, collection_name, vector_size)
+    embedder = GeminiEmbedder()
+    qdrant_url = _get_env("QDRANT_URL")
+    qdrant_api_key = _get_optional_env("QDRANT_API_KEY")
 
-    batch_size = 64
-    for i in range(0, len(points), batch_size):
-        client.upsert(
-            collection_name=collection_name,
-            points=points[i : i + batch_size],
-            wait=True,
-        )
-
-    return len(points)
-
-
-def _ensure_collection(client: QdrantClient, collection_name: str, vector_size: int) -> None:
-    if client.collection_exists(collection_name):
-        return
-
-    client.create_collection(
+    vector_store = QdrantVectorStore.from_documents(
+        documents=documents,
+        embedding=embedder,
+        url=qdrant_url,
+        api_key=qdrant_api_key,
         collection_name=collection_name,
-        vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
     )
+
+    # Keep an explicit no-op reference so linter/type-checkers know it is intentionally used.
+    del vector_store
+
+    return len(documents)
 
 
 def _extract_pdf_chunks(

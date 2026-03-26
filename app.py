@@ -1,14 +1,15 @@
 import time
+import uuid
 
 import streamlit as st
 
-from backend.agent import build_context, run_agent_sync
+from backend.agent import build_context, get_conversation_history, run_agent_sync
 
 st.set_page_config(page_title="Real-Time Voice RAG Agent", page_icon="AI")
 st.title("Real-Time Voice RAG Agent - Phase 2")
 
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
 if "last_debug" not in st.session_state:
     st.session_state.last_debug = {
@@ -21,17 +22,18 @@ with st.sidebar:
     st.subheader("Toggles")
     use_rag = st.toggle("RAG", value=True)
     use_tools = st.toggle("Tools", value=False)
+    st.caption(f"Session: {st.session_state.session_id[:8]}")
 
 st.subheader("Chat")
 
-for msg in st.session_state.messages:
+messages = get_conversation_history(st.session_state.session_id)
+for msg in messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
 query = st.chat_input("Ask something")
 
 if query:
-    st.session_state.messages.append({"role": "user", "content": query})
     with st.chat_message("user"):
         st.markdown(query)
 
@@ -45,8 +47,8 @@ if query:
     with st.chat_message("assistant"):
         response = st.write_stream(
             run_agent_sync(
+                session_id=st.session_state.session_id,
                 query=query,
-                history=st.session_state.messages,
                 use_rag=use_rag,
                 use_tools=use_tools,
                 context_payload=context_payload,
@@ -59,7 +61,6 @@ if query:
         "tool_outputs": context_payload.get("tool_outputs", []),
         "latency_ms": latency_ms,
     }
-    st.session_state.messages.append({"role": "assistant", "content": response})
 
 st.subheader("Debug")
 debug = st.session_state.last_debug
