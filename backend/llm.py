@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping
 import os
+from dotenv import load_dotenv
 
 try:
     from openai import AsyncOpenAI
 except Exception:  # pragma: no cover - optional dependency fallback
     AsyncOpenAI = None
+
+load_dotenv()
 
 
 class LLMClient:
