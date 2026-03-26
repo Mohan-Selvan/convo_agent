@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from typing import Iterable, Mapping
+from typing import Iterable, Mapping, Any
 import os
-from dotenv import load_dotenv
 
-try:
-    from openai import AsyncOpenAI
-except Exception:  # pragma: no cover - optional dependency fallback
-    AsyncOpenAI = None
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
@@ -15,36 +12,55 @@ load_dotenv()
 class LLMClient:
     def __init__(self, model: str | None = None):
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+        self._llm = None
+
         api_key = os.getenv("OPENAI_API_KEY")
-        self._client = AsyncOpenAI(api_key=api_key) if AsyncOpenAI and api_key else None
+        if api_key:
+            self._llm = ChatOpenAI(
+                model=self.model,
+                api_key=api_key,
+                temperature=0,
+                streaming=True,
+            )
 
     async def stream(
         self,
         prompt: str,
         tools: list[Mapping[str, object]] | None = None,
     ):
-        if not self._client:
+        del tools
+
+        if not self._llm:
             for token in _fallback_stream(prompt):
                 yield token
             return
 
-        messages = [{"role": "user", "content": prompt}]
-        stream = await self._client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            stream=True,
-            tools=tools,
-        )
-
-        async for event in stream:
-            choice = event.choices[0]
-            delta = choice.delta.content
-            if delta:
-                yield delta
+        async for chunk in self._llm.astream(prompt):
+            content = _normalize_chunk_content(chunk.content)
+            if content:
+                yield content
 
 
 def get_model() -> LLMClient:
     return LLMClient()
+
+
+def _normalize_chunk_content(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "".join(parts)
+
+    return ""
 
 
 def _fallback_stream(prompt: str) -> Iterable[str]:
