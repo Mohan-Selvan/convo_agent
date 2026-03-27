@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Any
+from typing import Any, Iterable, Sequence
 import os
 
 from dotenv import load_dotenv
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_openai import ChatOpenAI
 
 load_dotenv()
@@ -23,19 +24,38 @@ class LLMClient:
                 streaming=True,
             )
 
-    async def stream(
-        self,
-        prompt: str,
-        tools: list[Mapping[str, object]] | None = None,
-    ):
-        del tools
+    def has_model(self) -> bool:
+        return self._llm is not None
 
+    @property
+    def chat_model(self) -> ChatOpenAI | None:
+        return self._llm
+
+    async def ainvoke(
+        self,
+        messages: Sequence[BaseMessage | tuple[str, str]],
+        tools: list[Any] | None = None,
+    ) -> AIMessage:
         if not self._llm:
-            for token in _fallback_stream(prompt):
+            text = "LLM provider not configured. Set OPENAI_API_KEY to use model output."
+            return AIMessage(content=text)
+
+        runnable = self._llm.bind_tools(tools) if tools else self._llm
+        return await runnable.ainvoke(messages)
+
+    async def astream(
+        self,
+        messages: Sequence[BaseMessage | tuple[str, str]],
+        tools: list[Any] | None = None,
+    ):
+        if not self._llm:
+            fallback = "LLM provider not configured. Set OPENAI_API_KEY to stream real model output."
+            for token in _fallback_stream(fallback):
                 yield token
             return
 
-        async for chunk in self._llm.astream(prompt):
+        runnable = self._llm.bind_tools(tools) if tools else self._llm
+        async for chunk in runnable.astream(messages):
             content = _normalize_chunk_content(chunk.content)
             if content:
                 yield content
@@ -63,11 +83,6 @@ def _normalize_chunk_content(content: Any) -> str:
     return ""
 
 
-def _fallback_stream(prompt: str) -> Iterable[str]:
-    text = (
-        "LLM provider not configured. "
-        "Set OPENAI_API_KEY to stream real model output. "
-        f"You asked: {prompt}"
-    )
+def _fallback_stream(text: str) -> Iterable[str]:
     for word in text.split(" "):
         yield word + " "
