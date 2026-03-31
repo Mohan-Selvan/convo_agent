@@ -1,40 +1,28 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-
-
-@dataclass
-class Message:
-    role: str
-    content: str
+from collections import defaultdict
+from typing import DefaultDict
 
 
 class InMemoryDatabase:
+    """Simple process-local chat memory store."""
+
+    # TODO: Replace with persistent storage (PostgreSQL/Redis) for production.
     def __init__(self):
-        self._conversations: dict[str, list[Message]] = {}
-        self._debug_state: dict[str, dict[str, Any]] = {}
+        self._messages: DefaultDict[str, list[tuple[str, str]]] = defaultdict(list)
 
-    # TODO: Replace this in-memory store with a persistent database before production.
-    def add_message(self, session_id: str, role: str, content: str) -> None:
-        if session_id not in self._conversations:
-            self._conversations[session_id] = []
-        self._conversations[session_id].append(Message(role=role, content=content))
+    def get_messages(self, session_id: str) -> list[tuple[str, str]]:
+        return list(self._messages.get(session_id, []))
 
-    def get_messages(self, session_id: str) -> list[dict[str, str]]:
-        messages = self._conversations.get(session_id, [])
-        return [{"role": m.role, "content": m.content} for m in messages]
+    def append_message(self, session_id: str, role: str, content: str) -> None:
+        self._messages[session_id].append((role, content))
 
-    def set_debug_state(self, session_id: str, state: dict[str, Any]) -> None:
-        self._debug_state[session_id] = state
+    def clear_session(self, session_id: str) -> None:
+        self._messages.pop(session_id, None)
 
-    def get_debug_state(self, session_id: str) -> dict[str, Any]:
-        return self._debug_state.get(
-            session_id,
-            {
-                "route": "rag",
-                "retrieved_docs": [],
-                "tool_outputs": [],
-                "latency_ms": None,
-            },
-        )
+
+_db = InMemoryDatabase()
+
+
+def get_memory_db() -> InMemoryDatabase:
+    return _db
