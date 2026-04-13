@@ -1,0 +1,9 @@
+python-dotenv
+fastapi
+uvicorn
+vosk
+langchain
+langchain-core
+soundfile
+librosa
+tqdm
