@@ -13,6 +13,8 @@ async def steam_audio(ws_url:str, file_path:str, loop: bool = True):
             total_frames = wf.getnframes()
             total_chunks = total_frames // chunk_size
 
+            loop_counter:int = 0
+
             print(f"Streaming audio: {file_path} (Sample Rate: {sample_rate}, Channels: {num_channels})")
 
             with tqdm(total=total_chunks, desc="Streaming Audio") as pbar:
@@ -22,6 +24,8 @@ async def steam_audio(ws_url:str, file_path:str, loop: bool = True):
                         if loop:
                             wf.rewind()  # Restart the audio file
                             pbar.reset()
+                            loop_counter += 1
+                            tqdm.write(f"Looping audio... (Loop count: {loop_counter})")
                             continue
                         else:
                             break

@@ -4,6 +4,8 @@ uvicorn
 vosk
 langchain
 langchain-core
+langchain_ollama
 soundfile
 librosa
 tqdm
+RealtimeTTS
