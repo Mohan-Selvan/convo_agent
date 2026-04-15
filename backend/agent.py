@@ -80,7 +80,7 @@ You are a helpful assistant that can perform various tasks based on user input. 
 model = ChatOllama(
     base_url="http://localhost:11434",
     model="gemma4:latest",
-    reasoning=True,)
+    reasoning=True)
 
 agent = create_agent(
     model=model,

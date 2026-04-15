@@ -16,6 +16,7 @@ from starlette.staticfiles import StaticFiles
 from agent import agent
 
 from stt.stt import STT
+from tts.tts import TTS
 from events import *
 
 
@@ -52,14 +53,14 @@ async def _agent_stream(event_stream:AsyncIterator[VoiceAgentEvent]) -> AsyncIte
     
     thread_id = str(uuid4())
 
-    buffer: list[str] = []
-
     async for event in event_stream:
         yield event
 
+        buffer:list[str] = []
+
         if event.type == "stt_output":
 
-            print(f"Human: , {event.transcript}\n")
+            print(f"Human: {event.transcript}\n")
 
             stream = agent.astream(
                 {"messages": [HumanMessage(content=event.transcript)]},
@@ -69,18 +70,28 @@ async def _agent_stream(event_stream:AsyncIterator[VoiceAgentEvent]) -> AsyncIte
 
             async for message, metadata in stream:
                 if isinstance(message, AIMessage):
+                    buffer.append(message.content)
                     yield AgentChunkEvent.create(text=message.text)
-                    buffer.append(message.text)
 
-            print(f"Agent response : {''.join(buffer)}\n\n{'-'*50}\n")
+            response = "".join(buffer)
+            print(f"Agent Response: {response}\n")
             buffer.clear()
-            yield AgentEndEvent.create()
+            yield AgentEndEvent.create(text=response)
+
+async def _tts_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIterator[VoiceAgentEvent]:
+    """Transforms AgentChunkEvents into TTSChunkEvents by synthesizing audio from text."""
+
+    tts = TTS()
+
+    async for event in event_stream:
+        yield event
+
+        if event.type == "agent_end":
+            print(event.text)
+            await tts.synthesize(event.text)
 
 
-
-
-
-pipeline = (RunnableGenerator(_stt_stream) | RunnableGenerator(_agent_stream))
+pipeline = (RunnableGenerator(_stt_stream) | RunnableGenerator(_agent_stream) | RunnableGenerator(_tts_stream))
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

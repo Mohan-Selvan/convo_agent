@@ -144,13 +144,15 @@ class AgentEndEvent:
 
     type: Literal["agent_end"]
 
+    text: str
+
     ts: int
     """Unix timestamp (milliseconds since epoch) when the event was created."""
 
     @classmethod
-    def create(cls) -> "AgentEndEvent":
+    def create(cls, text:str) -> "AgentEndEvent":
         """Factory method to create an AgentEndEvent event with current timestamp."""
-        return cls(type="agent_end", ts=_now_ms())
+        return cls(type="agent_end", text=text, ts=_now_ms())
 
 
 @dataclass
