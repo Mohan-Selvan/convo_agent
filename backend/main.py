@@ -37,14 +37,24 @@ async def _stt_stream(audio_stream: AsyncIterator[bytes],) -> AsyncIterator[Voic
     stt = STT(sample_rate=16000)
     print(f"STT Initialized..")
 
+    async def send_audio():
+        while True:
+            async for audio_chunk in audio_stream:
+                await stt.transcribe(audio_chunk)
+
+    send_task = asyncio.create_task(send_audio())
+    await asyncio.sleep(0.2)
+
     try:
-        async for audio_chunk in audio_stream:
-            stt_event = await stt.transcribe(audio_chunk)
-            yield stt_event
+        async for event in stt.receive_events():
+            yield event
     except Exception as e: 
         print(f"Error in STT stream: {e}")
     finally:
         print("STT stream stopped.")
+        with contextlib.suppress(asyncio.CancelledError):
+            send_task.cancel()
+            await send_task
 
 
 
@@ -58,7 +68,7 @@ async def _agent_stream(event_stream:AsyncIterator[VoiceAgentEvent]) -> AsyncIte
 
         buffer:list[str] = []
 
-        if event.type == "stt_output":
+        if event and event.type == "stt_output":
 
             print(f"Human: {event.transcript}\n")
 
@@ -86,12 +96,30 @@ async def _tts_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIter
     async for event in event_stream:
         yield event
 
-        if event.type == "agent_end":
+        if event and event.type == "agent_end":
             print(event.text)
             await tts.synthesize(event.text)
 
 
-pipeline = (RunnableGenerator(_stt_stream) | RunnableGenerator(_agent_stream) | RunnableGenerator(_tts_stream))
+async def _stt_debug_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIterator[VoiceAgentEvent]:
+    """Debug stream that logs incoming events."""
+
+    async for event in event_stream:
+
+        if not event:
+            continue
+
+        if event.type == "stt_chunk" and len(event.transcript) > 0:
+            print(f"{event.transcript} ")
+
+        # if event.type == "stt_output" and len(event.transcript) > 0:
+        #     print(f"{event.transcript}")
+        #     print("---")
+ 
+        yield event
+
+
+pipeline = (RunnableGenerator(_stt_stream) | RunnableGenerator(_stt_debug_stream)) #| RunnableGenerator(_agent_stream) | RunnableGenerator(_tts_stream))
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

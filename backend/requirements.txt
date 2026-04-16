@@ -12,3 +12,5 @@ realtimetts[coqui]
 sounddevice
 pyttsx3
 torchaudio
+realtimestt
+ctranslate2==4.4.0
