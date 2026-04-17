@@ -59,6 +59,10 @@ class STT:
             enable_realtime_transcription=True,
             on_realtime_transcription_update=self._on_transcription_update,
             on_realtime_transcription_stabilized=self._on_transcription_stabilized,
+            on_vad_detect_start=self._on_vad_detect_start,
+            on_vad_detect_stop=self._on_vad_detect_stop,
+            on_vad_start=self._on_vad_start,
+            on_vad_stop=self._on_vad_stop,
             silero_use_onnx=True,
             initial_prompt_realtime="""
 End incomplete sentences with ellipses.
@@ -71,6 +75,19 @@ Incomplete: "Because he..."
         )
 
         self.recorder.start()
+
+    def _on_vad_start(self):
+        print("VAD started.")
+
+    def _on_vad_stop(self):
+        print("VAD stopped.")
+
+    def _on_vad_detect_start(self):
+        print("VAD detected speech start.")
+
+    def _on_vad_detect_stop(self):
+        print("VAD detected speech stop.")
+
 
     def _on_transcription_update(self, transcript: str):
         self.queue.put_nowait(STTChunkEvent.create(transcript=transcript))

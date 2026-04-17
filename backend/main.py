@@ -50,11 +50,12 @@ async def _stt_stream(audio_stream: AsyncIterator[bytes],) -> AsyncIterator[Voic
             yield event
     except Exception as e: 
         print(f"Error in STT stream: {e}")
-    finally:
-        print("STT stream stopped.")
         with contextlib.suppress(asyncio.CancelledError):
             send_task.cancel()
             await send_task
+            await stt.close()
+            
+        print("STT stream stopped.")
 
 
 
