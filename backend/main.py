@@ -38,15 +38,16 @@ async def _stt_stream(audio_stream: AsyncIterator[bytes],) -> AsyncIterator[Voic
     print(f"STT Initialized..")
 
     async def send_audio():
-        while True:
-            async for audio_chunk in audio_stream:
-                await stt.transcribe(audio_chunk)
+        async for audio_chunk in audio_stream:
+            await stt.transcribe(audio_chunk)
 
     send_task = asyncio.create_task(send_audio())
     await asyncio.sleep(0.2)
 
     try:
         async for event in stt.receive_events():
+            if event:
+                print(event)
             yield event
     except Exception as e: 
         print(f"Error in STT stream: {e}")
@@ -111,11 +112,11 @@ async def _stt_debug_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> Asy
             continue
 
         if event.type == "stt_chunk" and len(event.transcript) > 0:
-            print(f"{event.transcript} ")
+            print(f"chunk: {event.transcript} ")
 
-        # if event.type == "stt_output" and len(event.transcript) > 0:
-        #     print(f"{event.transcript}")
-        #     print("---")
+        if event.type == "stt_output" and len(event.transcript) > 0:
+            print(f"output: {event.transcript}")
+            print("---")
  
         yield event
 

@@ -56,25 +56,40 @@ class STT:
             sample_rate=16000,
             device="cpu", #"cuda" if torch.cuda.is_available() else "cpu",
             use_microphone=False,
-            enable_realtime_transcription=True,
-            on_realtime_transcription_update=self._on_transcription_update,
-            on_realtime_transcription_stabilized=self._on_transcription_stabilized,
+            enable_realtime_transcription=False,
+            # on_realtime_transcription_update=self._on_transcription_update,
+            # on_realtime_transcription_stabilized=self._on_transcription_stabilized,
             on_vad_detect_start=self._on_vad_detect_start,
             on_vad_detect_stop=self._on_vad_detect_stop,
-            on_vad_start=self._on_vad_start,
-            on_vad_stop=self._on_vad_stop,
+            # on_vad_start=self._on_vad_start,
+            # on_vad_stop=self._on_vad_stop,
             silero_use_onnx=True,
-            initial_prompt_realtime="""
-End incomplete sentences with ellipses.
-Examples:
-Complete: "The sky is blue."
-Incomplete: "When the sky..."
-Complete: "She walked home."
-Incomplete: "Because he..."
-"""
+#             initial_prompt_realtime="""
+# End incomplete sentences with ellipses.
+# Examples:
+# Complete: "The sky is blue."
+# Incomplete: "When the sky..."
+# Complete: "She walked home."
+# Incomplete: "Because he..."
+# """
         )
 
         self.recorder.start()
+        print("Recorder started.")
+
+
+        self.transcription_task =asyncio.create_task(self._transcription_loop())
+        print("Transcription loop started.")
+
+    async def _transcription_loop(self):
+        loop = asyncio.get_running_loop()
+
+        def process_text(full_sentence:str):
+            if full_sentence.strip():
+                self.queue.put_nowait(STTOutputEvent.create(transcript=full_sentence)) 
+
+        while not self.is_closed:
+            await loop.run_in_executor(None, self.recorder.text, process_text)
 
     def _on_vad_start(self):
         print("VAD started.")
@@ -88,7 +103,6 @@ Incomplete: "Because he..."
     def _on_vad_detect_stop(self):
         print("VAD detected speech stop.")
 
-
     def _on_transcription_update(self, transcript: str):
         self.queue.put_nowait(STTChunkEvent.create(transcript=transcript))
 
@@ -97,14 +111,16 @@ Incomplete: "Because he..."
 
     async def transcribe(self, audio_chunk: bytes) -> None:
         self.recorder.feed_audio(audio_chunk, original_sample_rate=self.sample_rate)
-        await asyncio.sleep(0) 
+        await asyncio.sleep(0)
 
     async def receive_events(self) -> AsyncIterator[VoiceAgentEvent]:
         while not self.is_closed:
             event = await self.queue.get()
             yield event
 
-    def close(self):
+    async def close(self):
         self.is_closed = True
         self.recorder.stop()
+        self.transcription_task.cancel()
+        await self.transcription_task
 
