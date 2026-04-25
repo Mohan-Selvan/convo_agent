@@ -45,12 +45,13 @@ class STT:
     def __init__(self, sample_rate=16000):
 
         self.queue = asyncio.Queue()
+        self._loop = asyncio.get_running_loop()
         self.sample_rate = sample_rate
         self.is_closed = False
         self.recorder = AudioToTextRecorder(
             spinner=False,
-            compute_type="auto",
-            model="large-v2",
+            compute_type="int8",
+            model="base.en",
             realtime_model_type="tiny.en",
             language="en",
             sample_rate=16000,
@@ -59,11 +60,10 @@ class STT:
             enable_realtime_transcription=False,
             # on_realtime_transcription_update=self._on_transcription_update,
             # on_realtime_transcription_stabilized=self._on_transcription_stabilized,
-            on_vad_detect_start=self._on_vad_detect_start,
-            on_vad_detect_stop=self._on_vad_detect_stop,
-            # on_vad_start=self._on_vad_start,
-            # on_vad_stop=self._on_vad_stop,
+            on_recording_start=self._on_recording_start,
+            on_recording_stop=self._on_recording_stop,
             silero_use_onnx=True,
+            silero_deactivity_detection=True,
 #             initial_prompt_realtime="""
 # End incomplete sentences with ellipses.
 # Examples:
@@ -84,30 +84,27 @@ class STT:
     async def _transcription_loop(self):
         loop = asyncio.get_running_loop()
 
-        def process_text(full_sentence:str):
+        def process_text(full_sentence: str):
             if full_sentence.strip():
-                self.queue.put_nowait(STTOutputEvent.create(transcript=full_sentence)) 
+                self._enqueue(STTOutputEvent.create(transcript=full_sentence))
 
         while not self.is_closed:
             await loop.run_in_executor(None, self.recorder.text, process_text)
 
-    def _on_vad_start(self):
-        print("VAD started.")
+    def _enqueue(self, event: VoiceAgentEvent) -> None:
+        self._loop.call_soon_threadsafe(self.queue.put_nowait, event)
 
-    def _on_vad_stop(self):
-        print("VAD stopped.")
+    def _on_recording_start(self):
+        self._enqueue(VoiceStartEvent.create())
 
-    def _on_vad_detect_start(self):
-        print("VAD detected speech start.")
-
-    def _on_vad_detect_stop(self):
-        print("VAD detected speech stop.")
+    def _on_recording_stop(self):
+        self._enqueue(VoiceStopEvent.create())
 
     def _on_transcription_update(self, transcript: str):
-        self.queue.put_nowait(STTChunkEvent.create(transcript=transcript))
+        self._enqueue(STTChunkEvent.create(transcript=transcript))
 
     def _on_transcription_stabilized(self, transcript: str):
-        self.queue.put_nowait(STTOutputEvent.create(transcript=transcript))
+        self._enqueue(STTOutputEvent.create(transcript=transcript))
 
     async def transcribe(self, audio_chunk: bytes) -> None:
         self.recorder.feed_audio(audio_chunk, original_sample_rate=self.sample_rate)

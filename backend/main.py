@@ -111,13 +111,19 @@ async def _stt_debug_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> Asy
         if not event:
             continue
 
+        if event.type == "voice_start":
+            print("voice_start: user started speaking")
+
+        if event.type == "voice_stop":
+            print("voice_stop: user finished, transcribing...")
+
         if event.type == "stt_chunk" and len(event.transcript) > 0:
             print(f"chunk: {event.transcript} ")
 
         if event.type == "stt_output" and len(event.transcript) > 0:
             print(f"output: {event.transcript}")
             print("---")
- 
+
         yield event
 
 

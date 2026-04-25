@@ -1,13 +1,9 @@
 """
 Voice Agent Event Types
 
-Python implementation of the voice agent event system.
-All events in the pipeline share common properties to enable
-consistent handling, logging, and debugging across the system.
+Python implementation of the voice agent event system. All events in the pipeline share common properties to enable consistent handling, logging, and debugging across the system.
 
-This module defines typed dataclasses for all events that flow through
-the voice agent pipeline, from user audio input through STT, agent
-processing, and TTS output.
+This module defines typed dataclasses for all events that flow through the voice agent pipeline, from user audio input through STT, agent processing, and TTS output.
 """
 
 import base64
@@ -26,8 +22,7 @@ class UserInputEvent:
     """
     Event emitted when raw audio data is received from the user.
 
-    This is the entry point of the voice agent pipeline. Audio should be
-    in PCM format (16-bit, mono, 16kHz) for optimal processing by the STT stage.
+    This is the entry point of the voice agent pipeline. Audio should be in PCM format (16-bit, mono, 16kHz) for optimal processing by the STT stage.
     """
 
     type: Literal["user_input"]
@@ -45,6 +40,41 @@ class UserInputEvent:
     def create(cls, audio: bytes) -> "UserInputEvent":
         """Factory method to create a UserInputEvent event with current timestamp."""
         return cls(type="user_input", audio=audio, ts=_now_ms())
+
+
+@dataclass
+class VoiceStartEvent:
+    """Emitted when VAD confirms the start of an utterance."""
+
+    type: Literal["voice_start"]
+
+    ts: int
+    """Unix timestamp (milliseconds since epoch) when the event was created."""
+
+    @classmethod
+    def create(cls) -> "VoiceStartEvent":
+        return cls(type="voice_start", ts=_now_ms())
+
+
+@dataclass
+class VoiceStopEvent:
+    """Emitted when VAD confirms the end of an utterance.
+
+    Fires before transcription completes, so it is the earliest signal that
+    the user has finished speaking and the agent turn will run next.
+    """
+
+    type: Literal["voice_stop"]
+
+    ts: int
+    """Unix timestamp (milliseconds since epoch) when the event was created."""
+
+    @classmethod
+    def create(cls) -> "VoiceStopEvent":
+        return cls(type="voice_stop", ts=_now_ms())
+
+
+VADEvent = Union[VoiceStartEvent, VoiceStopEvent]
 
 
 @dataclass
@@ -259,12 +289,14 @@ class TTSChunkEvent:
         return cls(type="tts_chunk", audio=audio, ts=_now_ms())
 
 
-VoiceAgentEvent = Union[UserInputEvent, STTEvent, AgentEvent, TTSChunkEvent]
+VoiceAgentEvent = Union[UserInputEvent, VADEvent, STTEvent, AgentEvent, TTSChunkEvent]
 
 
 def event_to_dict(event: VoiceAgentEvent) -> dict:
     """Convert a VoiceAgentEvent to a JSON-serializable dictionary."""
     if isinstance(event, UserInputEvent):
+        return {"type": event.type, "ts": event.ts}
+    elif isinstance(event, (VoiceStartEvent, VoiceStopEvent)):
         return {"type": event.type, "ts": event.ts}
     elif isinstance(event, STTChunkEvent):
         return {"type": event.type, "transcript": event.transcript, "ts": event.ts}
