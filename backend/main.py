@@ -131,16 +131,22 @@ async def _agent_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIt
             await asyncio.gather(agent_task, return_exceptions=True)
 
 async def _tts_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIterator[VoiceAgentEvent]:
-    """Transforms AgentChunkEvents into TTSChunkEvents by synthesizing audio from text."""
+    """Speak agent output as it streams. Stops playback on barge-in events."""
 
     tts = TTS()
 
-    async for event in event_stream:
-        yield event
+    try:
+        async for event in event_stream:
+            yield event
 
-        if event and event.type == "agent_end":
-            print(event.text)
-            await tts.synthesize(event.text)
+            if should_barge_in(event) and tts.is_playing():
+                print("[barge-in] tts stopped")
+                tts.stop()
+
+            if event.type == "agent_chunk":
+                tts.feed(event.text)
+    finally:
+        tts.stop()
 
 
 async def _stt_debug_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIterator[VoiceAgentEvent]:
@@ -171,8 +177,8 @@ pipeline = (
     RunnableGenerator(_stt_stream)
     | RunnableGenerator(_stt_debug_stream)
     | RunnableGenerator(_agent_stream)
+    | RunnableGenerator(_tts_stream)
 )
-# TTS stage stays out until we wire streaming audio back to the client.
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

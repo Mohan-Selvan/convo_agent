@@ -1,28 +1,23 @@
-import asyncio
-from typing import AsyncIterator
-import sounddevice as sd
-import numpy as np
-
 from RealtimeTTS import TextToAudioStream
 from RealtimeTTS.engines.system_engine import SystemEngine
 
 
 class TTS:
 
-    def _on_audio_chunk(self, chunk: bytes):
-        sd.play(np.frombuffer(chunk, dtype=np.int16), samplerate=16000, blocking=False)
-
-
     def __init__(self):
-        engine = SystemEngine(print_installed_voices=True)
-        self.stream = TextToAudioStream(engine)
-        self.stream.play_async(debug=False)
+        self.engine = SystemEngine()
+        self.stream = TextToAudioStream(self.engine)
 
-
-    async def synthesize(self, text: str) -> AsyncIterator[bytes]:
+    def feed(self, text: str) -> None:
+        if not text:
+            return
         self.stream.feed(text)
+        if not self.stream.is_playing():
+            self.stream.play_async(muted=False)
 
-        print(f"Feeding text : {text}")
+    def stop(self) -> None:
+        if self.stream.is_playing():
+            self.stream.stop()
 
-        if(not self.stream.is_playing()):
-            self.stream.play_async(debug=False, muted=False)
+    def is_playing(self) -> bool:
+        return self.stream.is_playing()
