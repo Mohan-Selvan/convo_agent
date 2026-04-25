@@ -64,6 +64,7 @@ class STT:
             on_recording_stop=self._on_recording_stop,
             silero_use_onnx=True,
             silero_deactivity_detection=True,
+            post_speech_silence_duration=1.0,
 #             initial_prompt_realtime="""
 # End incomplete sentences with ellipses.
 # Examples:

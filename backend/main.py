@@ -60,35 +60,75 @@ async def _stt_stream(audio_stream: AsyncIterator[bytes],) -> AsyncIterator[Voic
 
 
 
-async def _agent_stream(event_stream:AsyncIterator[VoiceAgentEvent]) -> AsyncIterator[VoiceAgentEvent]:
-    """Processes a stream of VoiceAgentEvents through anagent and yields resulting events."""
-    
+def should_barge_in(event: VoiceAgentEvent) -> bool:
+    return event.type == "voice_start"
+
+
+async def _agent_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIterator[VoiceAgentEvent]:
+    """Run the agent on each STT output. Cancel the in-flight turn when should_barge_in fires."""
+
     thread_id = str(uuid4())
+    out: asyncio.Queue = asyncio.Queue()
+    sentinel = object()
+    agent_task: asyncio.Task | None = None
 
-    async for event in event_stream:
-        yield event
-
-        buffer:list[str] = []
-
-        if event and event.type == "stt_output":
-
-            print(f"Human: {event.transcript}\n")
-
+    async def run_agent(transcript: str):
+        buffer: list[str] = []
+        try:
+            print(f"Human: {transcript}")
             stream = agent.astream(
-                {"messages": [HumanMessage(content=event.transcript)]},
-                {"configurable": {"thread_id": thread_id }},
+                {"messages": [HumanMessage(content=transcript)]},
+                {"configurable": {"thread_id": thread_id}},
                 stream_mode="messages",
             )
-
-            async for message, metadata in stream:
+            async for message, _ in stream:
                 if isinstance(message, AIMessage):
                     buffer.append(message.content)
-                    yield AgentChunkEvent.create(text=message.text)
-
+                    await out.put(AgentChunkEvent.create(text=message.text))
             response = "".join(buffer)
-            print(f"Agent Response: {response}\n")
-            buffer.clear()
-            yield AgentEndEvent.create(text=response)
+            print(f"Agent Response: {response}")
+            await out.put(AgentEndEvent.create(text=response))
+        except asyncio.CancelledError:
+            print(f"[barge-in] agent turn cancelled (partial={''.join(buffer)!r})")
+            raise
+
+    async def cancel_agent():
+        nonlocal agent_task
+        if agent_task and not agent_task.done():
+            agent_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await agent_task
+
+    async def pump():
+        nonlocal agent_task
+        try:
+            async for event in event_stream:
+                await out.put(event)
+
+                if should_barge_in(event):
+                    await cancel_agent()
+
+                if event.type == "stt_output":
+                    await cancel_agent()
+                    agent_task = asyncio.create_task(run_agent(event.transcript))
+        finally:
+            await out.put(sentinel)
+
+    pump_task = asyncio.create_task(pump())
+
+    try:
+        while True:
+            item = await out.get()
+            if item is sentinel:
+                break
+            yield item
+    finally:
+        pump_task.cancel()
+        if agent_task:
+            agent_task.cancel()
+        await asyncio.gather(pump_task, return_exceptions=True)
+        if agent_task:
+            await asyncio.gather(agent_task, return_exceptions=True)
 
 async def _tts_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> AsyncIterator[VoiceAgentEvent]:
     """Transforms AgentChunkEvents into TTSChunkEvents by synthesizing audio from text."""
@@ -127,7 +167,12 @@ async def _stt_debug_stream(event_stream: AsyncIterator[VoiceAgentEvent]) -> Asy
         yield event
 
 
-pipeline = (RunnableGenerator(_stt_stream) | RunnableGenerator(_stt_debug_stream)) #| RunnableGenerator(_agent_stream) | RunnableGenerator(_tts_stream))
+pipeline = (
+    RunnableGenerator(_stt_stream)
+    | RunnableGenerator(_stt_debug_stream)
+    | RunnableGenerator(_agent_stream)
+)
+# TTS stage stays out until we wire streaming audio back to the client.
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
