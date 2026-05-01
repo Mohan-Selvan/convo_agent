@@ -1,6 +1,6 @@
-# convo_agent (Voice Consultant - local)
+# Voice Consultant (convo_agent)
 
-A streaming voice agent. Audio in, audio out, with a real LLM in the middle and proper barge-in support so the user can interrupt the agent mid-sentence.
+A streaming voice agent. Audio in, audio out, with a real LLM in the middle and proper barge-in / interruption support. The entire pipeline can run locally with a low-tier to mid-tier hardware.
 
 ## TL;DR
 
